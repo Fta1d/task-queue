@@ -62,12 +62,44 @@ impl<T> TaskQueue<T> {
         Ok(queue.len())
     }
 
-    pub fn peek<F, R>(&self, f: F) -> Result<Option<&T>, QueueError>
+    /// The issue with peek is that it returns reference to data (&T),
+    /// which isn't protected by mutex, but mutex itself unlocks at the
+    /// end of a method (when MutexGuard goes out of sight). It creates
+    /// dangerous reference, which points to the data that can be reached
+    /// by any thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `&self` - reference to the queue object
+    /// * `f` - function that takes a reference to a queue element of type `T` and returns a result of type `R`
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Option<&T>, QueueError>` - on success returns an `Option` with a reference to the element,
+    ///   which can be `None` if the queue is empty, or a `QueueError` on failure
+    ///
+    /// # Errors
+    ///
+    /// Returns `QueueError` if the queue could not be locked for reading.
+    ///
+    /// # Note
+    ///
+    /// Note that although the function takes a parameter `f: F` which transforms `&T` into `R`,
+    /// the return signature still contains `&T`, not `R`. This might be an inconsistency
+    /// and requires verification.
+
+    pub fn peek<F, R>(&self, f: F) -> Result<R, QueueError>
     where
-        F: FnOnce(&T) -> R
+        F: FnOnce(Option<&T>) -> R
     {
+        // Lock the queue for safe access
+        // The ? operator will return an error if lock_queue() fails
         let mut queue = self.lock_queue()?;
-        Ok(queue.front().map(f))
+
+        // front() returns Option<&T> - a reference to the first element, if it exists
+        // map(f) applies function f to the element, if present
+        // Wrap the result in Ok to return Result
+        Ok(f(queue.front()))
     }
 
     pub fn is_empty(&self) -> Result<bool, QueueError> {
